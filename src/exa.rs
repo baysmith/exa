@@ -106,22 +106,48 @@ impl<'args, 'w, W: Write + 'w> Exa<'args, 'w, W> {
         let mut exit_status = 0;
 
         for file_path in &self.args {
-            match File::from_args(PathBuf::from(file_path), None, None) {
-                Err(e) => {
-                    exit_status = 2;
-                    writeln!(stderr(), "{:?}: {}", file_path, e)?;
-                },
-                Ok(f) => {
-                    if f.points_to_directory() && !self.options.dir_action.treat_dirs_as_files() {
-                        match f.to_dir() {
-                            Ok(d) => dirs.push(d),
-                            Err(e) => writeln!(stderr(), "{:?}: {}", file_path, e)?,
+            let mut glob_ok = true;
+            let mut glob_files = Vec::new();
+            if let Some(file_path) = file_path.to_str() {
+                if file_path.chars().any(|c| "*?[]".contains(c)) {
+                    println!("{:?}", file_path);
+                    if let Ok(paths) = glob::glob(file_path) {
+                        for path in paths {
+                            if let Ok(path) = path {
+                                if let Ok(file) = File::from_args(PathBuf::from(path), None, None) {
+                                    glob_files.push(file);
+                                } else {
+                                    glob_ok = false;
+                                    break;
+                                }
+                            } else {
+                                glob_ok = false;
+                                break;
+                            }
                         }
                     }
-                    else {
-                        files.push(f);
-                    }
-                },
+                }
+            }
+            if glob_ok && !glob_files.is_empty() {
+                files.extend(glob_files);
+            } else {
+                match File::from_args(PathBuf::from(file_path), None, None) {
+                    Err(e) => {
+                        exit_status = 2;
+                        writeln!(stderr(), "{:?}: {}", file_path, e)?;
+                    },
+                    Ok(f) => {
+                        if f.points_to_directory() && !self.options.dir_action.treat_dirs_as_files() {
+                            match f.to_dir() {
+                                Ok(d) => dirs.push(d),
+                                Err(e) => writeln!(stderr(), "{:?}: {}", file_path, e)?,
+                            }
+                        }
+                        else {
+                            files.push(f);
+                        }
+                    },
+                }
             }
         }
 
